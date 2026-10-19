@@ -1,5 +1,6 @@
 import pandas as pd
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.linear_model import Ridge
@@ -19,19 +20,26 @@ def preprocess_data(X_train, y_train, X_test):
     X_test_imputed = X_test.copy()
     X_train_imputed[features] = imputer.fit_transform(X_train[features])
     X_test_imputed[features] = imputer.transform(X_test[features])
+
+    # Scale features
+    scaler = StandardScaler()
+    X_train_scaled = X_train_imputed.copy()
+    X_test_scaled = X_test_imputed.copy()
+    X_train_scaled[features] = scaler.fit_transform(X_train_imputed[features])
+    X_test_scaled[features] = scaler.transform(X_test_imputed[features])
     
     # Remove outliers
     iso = IsolationForest(contamination=0.01, random_state=42)
-    outlier_preds = iso.fit_predict(X_train_imputed[features])
+    outlier_preds = iso.fit_predict(X_train_scaled[features])
     clean_mask = (outlier_preds != -1)
     
-    X_train_clean = X_train_imputed[clean_mask].copy()
+    X_train_clean = X_train_scaled[clean_mask].copy()
     y_train_clean = y_train[clean_mask].copy()
     
     # Feature Selection using variance threshold
     selector = VarianceThreshold(threshold=0.01)
     X_train_selected = selector.fit_transform(X_train_clean[features])
-    X_test_selected = selector.transform(X_test_imputed[features])
+    X_test_selected = selector.transform(X_test_scaled[features])
     
     return X_train_selected, y_train_clean, X_test_selected, X_test['id']
 

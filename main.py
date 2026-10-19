@@ -1,9 +1,10 @@
 import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import IsolationForest
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.linear_model import Ridge
+from sklearn.model_selection import cross_val_score
+from sklearn.pipeline import Pipeline
 
 def load_data():
     X_train = pd.read_csv('X_train.csv')
@@ -11,57 +12,42 @@ def load_data():
     X_test = pd.read_csv('X_test.csv')
     return X_train, y_train, X_test
 
-def preprocess_data(X_train, y_train, X_test):
-    features = [col for col in X_train.columns if col != 'id']
-    
-    # Impute missing values using the median
-    imputer = SimpleImputer(strategy='median')
-    X_train_imputed = X_train.copy()
-    X_test_imputed = X_test.copy()
-    X_train_imputed[features] = imputer.fit_transform(X_train[features])
-    X_test_imputed[features] = imputer.transform(X_test[features])
-
-    # Scale features
-    scaler = StandardScaler()
-    X_train_scaled = X_train_imputed.copy()
-    X_test_scaled = X_test_imputed.copy()
-    X_train_scaled[features] = scaler.fit_transform(X_train_imputed[features])
-    X_test_scaled[features] = scaler.transform(X_test_imputed[features])
-    
-    # Remove outliers
-    iso = IsolationForest(contamination=0.01, random_state=42)
-    outlier_preds = iso.fit_predict(X_train_scaled[features])
-    clean_mask = (outlier_preds != -1)
-    
-    X_train_clean = X_train_scaled[clean_mask].copy()
-    y_train_clean = y_train[clean_mask].copy()
-    
-    # Feature Selection using variance threshold
-    selector = VarianceThreshold(threshold=0.01)
-    X_train_selected = selector.fit_transform(X_train_clean[features])
-    X_test_selected = selector.transform(X_test_scaled[features])
-    
-    return X_train_selected, y_train_clean, X_test_selected, X_test['id']
-
-def train_and_predict(X_train, y_train, X_test):
-    model = Ridge(alpha=1.0)
-    
-    # Extract ages column
-    y_ages = y_train.iloc[:, 1]
-    model.fit(X_train, y_ages)
-    
-    y_pred = model.predict(X_test)
-    return y_pred
+def create_pipeline(alpha_value):
+    return Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler()),
+        ('selector', VarianceThreshold(threshold=0.01)),
+        ('model', Ridge(alpha=alpha_value))
+    ])
 
 def main():
+    ALPHA = 5000.0  
+    
+    # Load data
     X_train, y_train, X_test = load_data()
     
-    X_train_clean, y_train_clean, X_test_clean, test_ids = preprocess_data(X_train, y_train, X_test)
+    features = [col for col in X_train.columns if col != 'id']
+    X = X_train[features]
+    y = y_train.iloc[:, 1]
     
-    y_pred = train_and_predict(X_train_clean, y_train_clean, X_test_clean)
+    # Evaluate locally using Cross-Validation
+    pipeline = create_pipeline(ALPHA)
+    scores = cross_val_score(
+        pipeline, X, y, 
+        cv=5, 
+        scoring='neg_root_mean_squared_error'
+    )
+    rmse_scores = -scores
+    print(f"📊 Local Validation RMSE (alpha={ALPHA}): {rmse_scores.mean():.2f} years (+/- {rmse_scores.std():.2f})")
     
+    # Train on all training data and predict on test data
+    pipeline.fit(X, y)
+    X_test_features = X_test[features]
+    y_pred = pipeline.predict(X_test_features)
+    
+    # Generate submission file
     submission = pd.DataFrame({
-        'id': test_ids,
+        'id': X_test['id'],
         'y': y_pred
     })
     
